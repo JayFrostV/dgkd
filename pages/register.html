@@ -1,0 +1,136 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Đăng ký - UniTeach</title>
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="auth-styles.css">
+</head>
+<body>
+    <div class="auth-wrapper">
+        <div class="auth-box">
+            <div class="auth-logo">
+                <i class="fas fa-user-plus"></i>
+                <span>UniTeach</span>
+            </div>
+            <h1>Tạo tài khoản mới</h1>
+            <div class="form-group">
+                <label class="form-label" for="register-email">Email</label>
+                <input type="email" id="register-email" class="form-input" placeholder="Nhập email của bạn">
+                <div id="email-error" class="error-message"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="register-password">Mật khẩu</label>
+                <input type="password" id="register-password" class="form-input" placeholder="Tối thiểu 6 ký tự">
+                <div id="password-error" class="error-message"></div>
+            </div>
+            <div class="form-group">
+                <label class="form-label" for="register-confirm-password">Nhập lại mật khẩu</label>
+                <input type="password" id="register-confirm-password" class="form-input" placeholder="Nhập lại mật khẩu của bạn">
+                <div id="confirm-password-error" class="error-message"></div>
+            </div>
+            <button class="btn" id="register-btn">Đăng ký</button>
+            <div class="link">
+                Đã có tài khoản? <a href="login.html">Đăng nhập</a>
+            </div>
+        </div>
+    </div>
+
+    <div id="success-modal" class="success-modal">
+        <div class="success-modal-content">
+            <i class="fas fa-check-circle"></i>
+            <h2>Đăng ký thành công!</h2>
+            <p>Tài khoản của bạn đã được tạo.</p>
+            <button class="btn" id="close-modal-btn" style="margin-top: 20px; width: auto; padding: 10px 30px;">OK</button>
+        </div>
+    </div>
+
+    <script type="module">
+        import { initializeApp } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-app.js";
+        import { getAuth, createUserWithEmailAndPassword } from "https://www.gstatic.com/firebasejs/9.6.1/firebase-auth.js";
+
+        const firebaseConfig = {
+          apiKey: "AIzaSyC-jf9O0q7XcWPv6XsKiiVpfk_PWtxLUpo",
+          authDomain: "dgkd-61f70.firebaseapp.com",
+          projectId: "dgkd-61f70",
+          storageBucket: "dgkd-61f70.firebasestorage.app",
+          messagingSenderId: "1076873818581",
+          appId: "1:1076873818581:web:fc320dde761af4c0574d5c"
+        };
+        
+        const app = initializeApp(firebaseConfig);
+        const auth = getAuth(app);
+
+        const registerBtn = document.getElementById('register-btn');
+        const emailInput = document.getElementById('register-email');
+        const passwordInput = document.getElementById('register-password');
+        const confirmPasswordInput = document.getElementById('register-confirm-password');
+        
+        const emailError = document.getElementById('email-error');
+        const passwordError = document.getElementById('password-error');
+        const confirmPasswordError = document.getElementById('confirm-password-error');
+
+        function validateEmail(email) {
+            const re = /^(([^<>()[\]\\.,;:\s@"]+(\.[^<>()[\]\\.,;:\s@"]+)*)|(".+"))@((\[[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\.[0-9]{1,3}\])|(([a-zA-Z\-0-9]+\.)+[a-zA-Z]{2,}))$/;
+            return re.test(String(email).toLowerCase());
+        }
+
+        function validateForm() {
+            let isValid = true;
+            emailError.style.display = 'none';
+            passwordError.style.display = 'none';
+            confirmPasswordError.style.display = 'none';
+
+            if (!validateEmail(emailInput.value)) {
+                emailError.textContent = 'Định dạng email không hợp lệ.';
+                emailError.style.display = 'block';
+                isValid = false;
+            }
+            if (passwordInput.value.length < 6) {
+                passwordError.textContent = 'Mật khẩu phải có ít nhất 6 ký tự.';
+                passwordError.style.display = 'block';
+                isValid = false;
+            }
+            if (passwordInput.value !== confirmPasswordInput.value) {
+                confirmPasswordError.textContent = 'Mật khẩu nhập lại không khớp.';
+                confirmPasswordError.style.display = 'block';
+                isValid = false;
+            }
+            return isValid;
+        }
+
+        const register = async () => {
+            if (!validateForm()) return;
+
+            const email = emailInput.value;
+            const password = passwordInput.value;
+
+            try {
+                registerBtn.disabled = true;
+                registerBtn.textContent = 'Đang xử lý...';
+                await createUserWithEmailAndPassword(auth, email, password);
+                document.getElementById('success-modal').style.display = 'flex';
+            } catch (error) {
+                if (error.code === 'auth/email-already-in-use') {
+                    emailError.textContent = 'Email này đã được sử dụng.';
+                    emailError.style.display = 'block';
+                } else {
+                    alert('Lỗi đăng ký: ' + error.message);
+                }
+            } finally {
+                registerBtn.disabled = false;
+                registerBtn.textContent = 'Đăng ký';
+            }
+        };
+
+        registerBtn.addEventListener('click', register);
+        
+        document.getElementById('close-modal-btn').addEventListener('click', () => {
+            document.getElementById('success-modal').style.display = 'none';
+            // Chuyển về trang đăng nhập sau khi đóng modal
+            window.location.href = 'login.html';
+        });
+    </script>
+</body>
+</html>
