@@ -474,3 +474,41 @@ body {
 .report-controls .form-group {
     margin-bottom: 0;
 }
+/* Thêm vào cuối file styles.css */
+
+.form-group-inline {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 20px;
+}
+
+.form-group-inline .form-group {
+    margin-bottom: 0;
+    flex-grow: 1;
+}
+
+.form-group-inline .btn {
+    flex-shrink: 0;
+}
+
+#payment-result-container, #report-content-container {
+    margin-top: 25px;
+}
+
+.payment-summary {
+    padding: 20px;
+    background-color: #f8f9fa;
+    border-top: 2px solid var(--secondary);
+    text-align: right;
+}
+
+.payment-summary h3 {
+    font-size: 1.5rem;
+    color: var(--primary);
+}
+
+.payment-summary h3 span {
+    color: var(--success);
+    font-weight: 700;
+}
