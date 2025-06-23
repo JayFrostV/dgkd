@@ -143,7 +143,7 @@ const GENERIC_CONFIG = {
             { name: 'name', label: 'Tên học phần', type: 'text', required: true, pattern: "^[^0-9]*$", title: "Tên học phần không được chứa số." },
             { name: 'credits', label: 'Số tín chỉ', type: 'number', required: true, min: 0 },
             { name: 'periods', label: 'Số tiết', type: 'number', required: true, min: 0 },
-            { name: 'coefficient', label: 'Hệ số học phần', type: 'number', required: true, min: 0, step: 0.1 }
+            { name: 'coefficient', label: 'Hệ số học phần', type: 'number', required: true, min: 1, max: 1.5, step: 0.1 }
         ],
         columns: [
             { header: 'Mã HP', render: i => i.courseCode },
@@ -465,11 +465,13 @@ const generateReport = () => {
     const container = document.getElementById('report-content-container');
     const summaryContainer = document.getElementById('report-summary-container');
     const searchInput = document.getElementById('report-search-input');
+    const exportBtn = document.getElementById('export-report-btn');
 
     container.innerHTML = '';
     summaryContainer.innerHTML = '';
     searchInput.value = '';
     state.currentReportData = [];
+    exportBtn.disabled = true;
 
     if (!schoolYear) {
         container.innerHTML = `<p style="padding: 20px; text-align: center;">Vui lòng chọn năm học để xem báo cáo.</p>`;
@@ -510,6 +512,10 @@ const generateReport = () => {
     state.currentReportData = reportData;
     renderReportTable(state.currentReportData);
     displayReportSummary(state.currentReportData);
+
+    if (reportData.length > 0) {
+        exportBtn.disabled = false;
+    }
 };
 
 const populateReportFilters = () => {
@@ -524,6 +530,38 @@ const populateReportFilters = () => {
     
     const schoolYears = [...new Set(state.semesters.map(s => s.schoolYear))].sort().reverse();
     yearReportSelect.innerHTML = '<option value="">-- Chọn năm học --</option>' + schoolYears.map(y => `<option value="${y}">${y}</option>`).join('');
+};
+
+const exportReportToCSV = () => {
+    if (!state.currentReportData || state.currentReportData.length === 0) {
+        alert("Không có dữ liệu báo cáo để xuất.");
+        return;
+    }
+
+    const headers = ['Tên Giáo viên', 'Khoa', 'Tổng tiền dạy (VNĐ)'];
+    
+    const csvRows = state.currentReportData.map(row => {
+        const teacherName = `"${row.teacherName.replace(/"/g, '""')}"`;
+        const facultyName = `"${row.facultyName.replace(/"/g, '""')}"`;
+        const totalPayment = row.totalPayment;
+        return [teacherName, facultyName, totalPayment].join(',');
+    });
+
+    const csvContent = [headers.join(','), ...csvRows].join('\n');
+
+    const blob = new Blob(['\uFEFF' + csvContent], { type: 'text/csv;charset=utf-8;' });
+    
+    const link = document.createElement("a");
+    if (link.download !== undefined) {
+        const url = URL.createObjectURL(blob);
+        const reportDate = new Date().toLocaleDateString('vi-VN').replace(/\//g, '-');
+        link.setAttribute("href", url);
+        link.setAttribute("download", `Bao_cao_tien_day_${reportDate}.csv`);
+        link.style.visibility = 'hidden';
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+    }
 };
 
 // =================================================================================
@@ -661,14 +699,17 @@ const setupEventListeners = () => {
     document.getElementById('calculate-payment-btn').addEventListener('click', displayPaymentCalculationResult);
     document.getElementById('generate-report-btn').addEventListener('click', generateReport);
     
+    document.getElementById('export-report-btn').addEventListener('click', exportReportToCSV);
+    
     document.getElementById('report-type-select').addEventListener('change', e => {
         document.getElementById('report-faculty-filter-group').style.display = e.target.value === 'faculty' ? 'block' : 'none';
     });
 
     document.getElementById('report-search-input').addEventListener('input', (e) => {
         const searchTerm = e.target.value.toLowerCase();
-        if (state.currentReportData.length > 0) {
-            const filteredData = state.currentReportData.filter(item => 
+        const dataToFilter = state.currentReportData || [];
+        if (dataToFilter.length > 0) {
+            const filteredData = dataToFilter.filter(item => 
                 item.teacherName.toLowerCase().includes(searchTerm)
             );
             renderReportTable(filteredData);
@@ -711,5 +752,6 @@ const setupEventListeners = () => {
     document.getElementById('modal-save-btn').addEventListener('click', saveForm);
 };
 
+// Expose functions to global scope
 window.openFormModal = openFormModal;
 window.deleteItem = deleteItem;
