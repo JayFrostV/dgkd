@@ -157,7 +157,7 @@ const GENERIC_CONFIG = {
         key: 'semesters', name: "Kỳ học", collection: "semesters",
         fields: [
             { name: 'name', label: 'Tên kỳ', type: 'text', required: true, placeholder: "Ví dụ: 1" },
-            { name: 'schoolYear', label: 'Năm học', type: 'text', required: true, placeholder: "Ví dụ: 2024-2025", pattern: "^\\d{4}-\\d{4}$", title: "Năm học phải có định dạng YYYY-YYYY" },
+            { name: 'schoolYear', label: 'Năm học', type: 'text', required: true, placeholder: "Ví dụ: 2024-2025", pattern: "^\\d{4}-\\d{4}$", title: "Năm học phải có định dạng StandardScaler-YYYY" },
             { name: 'startDate', label: 'Ngày bắt đầu', type: 'date', required: true },
             { name: 'endDate', label: 'Ngày kết thúc', type: 'date', required: true }
         ],
@@ -208,7 +208,6 @@ const GENERIC_CONFIG = {
             }
         ]
     },
-    // ================== CẬP NHẬT TOÀN BỘ CẤU HÌNH HỆ SỐ GV ==================
     teacherCoefficients: {
         key: 'teacherCoefficients', name: "Hệ số theo Bằng cấp", collection: "teacher_coefficients",
         fields: [
@@ -328,7 +327,6 @@ const getClassCoefficient = (studentCount) => {
     return 0.3;
 };
 
-// ================== CẬP NHẬT HÀM TÍNH LƯƠNG ĐỂ LẤY ĐÚNG HỆ SỐ GV THEO KỲ ==================
 const calculateTeacherPaymentForSemester = (teacherId, semesterId) => {
     const paymentRateDoc = state.paymentRates.find(rate => rate.semesterId === semesterId);
     const pricePerUnit = paymentRateDoc ? paymentRateDoc.pricePerUnit : 0;
@@ -340,7 +338,6 @@ const calculateTeacherPaymentForSemester = (teacherId, semesterId) => {
     const teacher = findById(state.teachers, teacherId);
     if (!teacher) return { details: [], totalPayment: 0 };
     
-    // Tìm hệ số của giáo viên ứng với kỳ học đang tính
     const teacherCoeffItem = state.teacherCoefficients.find(tc => 
         tc.degreeId === teacher.degreeId && tc.semesterId === semesterId
     );
@@ -404,7 +401,6 @@ const displayPaymentCalculationResult = () => {
             <td>${d.sectionCode}</td>
             <td>${d.courseName}</td>
             <td>${d.periods}</td>
-            <td>${d.classCoefficient}</td>
             <td>${d.courseCoefficient}</td>
             <td>${d.teacherCoefficient}</td>
             <td style="font-weight: bold;">${d.payment.toLocaleString('vi-VN')} VNĐ</td>
@@ -414,8 +410,12 @@ const displayPaymentCalculationResult = () => {
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Mã Lớp HP</th><th>Tên Học phần</th><th>Số tiết</th><th>HS Lớp</th>
-                    <th>HS Học phần</th><th>HS Bằng cấp (GV)</th><th>Tiền lớp</th>
+                    <th>Mã Lớp HP</th>
+                    <th>Tên Học phần</th>
+                    <th>Số tiết</th>
+                    <th>HS Học phần</th>
+                    <th>HS Bằng cấp (GV)</th>
+                    <th>Tiền lớp</th>
                 </tr>
             </thead>
             <tbody>${tableRows}</tbody>
@@ -622,14 +622,13 @@ const saveForm = async () => {
         if (config.key === 'teachers' && !data.teacherId) {
             data.teacherId = `GV${Math.floor(1000 + Math.random() * 9000)}`;
         }
-        // Thêm timestamp khi lưu định mức hoặc hệ số
         if (config.key === 'paymentRates' || config.key === 'teacherCoefficients') {
             data.timestamp = new Date();
         }
         
         const uniqueChecks = [
             { key: 'teachers', field: 'teacherId' }, { key: 'courses', field: 'courseCode' },
-            { key: 'courseSections', field: 'sectionCode' }, 
+            { key: 'courseSections', field: 'sectionCode' },
             { key: 'faculties', field: 'name' }, { key: 'faculties', field: 'shortName' },
             { key: 'degrees', field: 'name' }, { key: 'degrees', field: 'shortName' },
             { key: 'paymentRates', field: 'semesterId'}
@@ -642,12 +641,19 @@ const saveForm = async () => {
                 }
             }
         }
-        // Kiểm tra duy nhất cho cặp (semesterId, degreeId)
+        
+        // ================= LOGIC NÂNG CẤP BẮT ĐẦU TỪ ĐÂY =================
         if (config.key === 'teacherCoefficients') {
+            // Kiểm tra trùng cặp (Kỳ học, Bằng cấp)
             if (state.teacherCoefficients.some(item => item.semesterId === data.semesterId && item.degreeId === data.degreeId && item.id !== state.currentId)) {
                 throw new Error(`Đã có hệ số cho bằng cấp này trong kỳ học đã chọn.`);
             }
+            // Kiểm tra trùng giá trị hệ số trong cùng một kỳ
+            if (state.teacherCoefficients.some(item => item.semesterId === data.semesterId && item.coefficient === data.coefficient && item.id !== state.currentId)) {
+                throw new Error(`Giá trị hệ số ${data.coefficient} đã được sử dụng cho một bằng cấp khác trong kỳ học này.`);
+            }
         }
+        // ================= LOGIC NÂNG CẤP KẾT THÚC =================
 
         if (config.key === 'semesters') {
             const startDate = new Date(data.startDate);
