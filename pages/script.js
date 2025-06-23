@@ -212,7 +212,8 @@ const GENERIC_CONFIG = {
         key: 'teacherCoefficients', name: "Hệ số theo Bằng cấp", collection: "teacher_coefficients",
         fields: [
             { name: 'degreeId', label: 'Bằng cấp', type: 'select', options: () => state.degrees, required: true },
-            { name: 'coefficient', label: 'Hệ số', type: 'number', required: true, min: 0, step: 0.1 }
+            // THAY ĐỔI DUY NHẤT NẰM Ở DÒNG NÀY
+            { name: 'coefficient', label: 'Hệ số', type: 'number', required: true, min: 1, max: 3, step: 0.1 }
         ],
         columns: [
             { header: 'Bằng cấp', render: i => findById(state.degrees, i.degreeId)?.name || 'N/A' },
