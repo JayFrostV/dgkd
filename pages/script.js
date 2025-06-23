@@ -19,11 +19,12 @@ const auth = getAuth(app);
 const db = getFirestore(app);
 
 let state = {
-    settings: { pricePerUnit: 0 },
+    paymentRates: [], 
     faculties: [], degrees: [], semesters: [], courses: [], teachers: [],
     courseSections: [], assignments: [], teacherCoefficients: [],
     currentEntity: null, currentId: null,
-    facultyChart: null, degreeChart: null, semesterChart: null
+    facultyChart: null, degreeChart: null, semesterChart: null,
+    currentReportData: [] 
 };
 
 // =================================================================================
@@ -57,23 +58,13 @@ const fetchData = async (collectionName) => {
     return snapshot.docs.map(doc => ({ id: doc.id, ...doc.data() }));
 };
 
-const fetchSettings = async () => {
-    const docSnap = await getDoc(doc(db, 'settings', 'main'));
-    return docSnap.exists() ? docSnap.data() : { pricePerUnit: 0 };
-};
-
 const fetchAllData = async () => {
     try {
         const dataPromises = Object.keys(GENERIC_CONFIG).map(key => fetchData(GENERIC_CONFIG[key].collection));
-        dataPromises.unshift(fetchSettings());
-        
         const results = await Promise.all(dataPromises);
-        
-        state.settings = results[0];
         Object.keys(GENERIC_CONFIG).forEach((key, index) => {
-            state[key] = results[index + 1];
+            state[key] = results[index];
         });
-
         renderAllDynamicSections();
         updateDashboard();
         populateReportFilters();
@@ -86,9 +77,21 @@ const fetchAllData = async () => {
 const findById = (array, id) => array.find(item => item.id === id);
 
 // =================================================================================
-// CONFIGURATION OBJECT - ĐỐI TƯỢNG CẤU HÌNH TRUNG TÂM
+// CONFIGURATION OBJECT
 // =================================================================================
 const GENERIC_CONFIG = {
+    paymentRates: {
+        key: 'paymentRates', name: "Định mức", collection: "payment_rates",
+        fields: [
+            { name: 'semesterId', label: 'Kỳ học', type: 'select', options: () => state.semesters, optionLabel: (s) => `${s.name} (${s.schoolYear})`, required: true },
+            { name: 'pricePerUnit', label: 'Định mức tiền/tiết (VNĐ)', type: 'number', required: true, min: 0 }
+        ],
+        columns: [
+            { header: 'Kỳ học', render: i => { const s = findById(state.semesters, i.semesterId); return s ? `${s.name} (${s.schoolYear})` : 'N/A'; }},
+            { header: 'Định mức (VNĐ/tiết)', render: i => i.pricePerUnit.toLocaleString('vi-VN') },
+            { header: 'Ngày cập nhật', render: i => i.timestamp ? new Date(i.timestamp.seconds * 1000).toLocaleDateString('vi-VN') : 'N/A' }
+        ]
+    },
     faculties: {
         key: 'faculties', name: "Khoa", collection: "faculties",
         fields: [
@@ -193,7 +196,16 @@ const GENERIC_CONFIG = {
         columns: [
             { header: 'Lớp học phần', render: i => findById(state.courseSections, i.courseSectionId)?.sectionCode || 'N/A' },
             { header: 'Học phần', render: i => findById(state.courses, findById(state.courseSections, i.courseSectionId)?.courseId)?.name || 'N/A' },
-            { header: 'Giáo viên', render: i => findById(state.teachers, i.teacherId)?.name || 'N/A' }
+            { header: 'Giáo viên được phân công', render: i => findById(state.teachers, i.teacherId)?.name || 'N/A' },
+            { 
+                header: 'Suất dạy đã gán', 
+                render: i => {
+                    const section = findById(state.courseSections, i.courseSectionId);
+                    if (!section) return 'N/A';
+                    const assignedCount = state.assignments.filter(a => a.courseSectionId === i.courseSectionId).length;
+                    return `${assignedCount} / ${section.classCount}`;
+                } 
+            }
         ]
     },
     teacherCoefficients: {
@@ -213,21 +225,20 @@ const GENERIC_CONFIG = {
 // UI RENDERING
 // =================================================================================
 const renderAllDynamicSections = () => {
+    GENERIC_CONFIG['paymentRates'].name = "Định mức tiền/tiết";
+    renderGenericSection('paymentRates', state.paymentRates, 'settings-management-section');
     for (const key in GENERIC_CONFIG) {
+        if (key === 'paymentRates') continue;
         const config = GENERIC_CONFIG[key];
         const sectionId = `${config.key}-management-section`;
         renderGenericSection(key, state[key], sectionId);
     }
-    renderSettingsSection();
 };
-
 const renderGenericSection = (configKey, data, sectionId) => {
     const config = GENERIC_CONFIG[configKey];
     const container = document.getElementById(sectionId);
     if (!container) return;
-
     const tableHeaders = config.columns.map(col => `<th>${col.header}</th>`).join('');
-    
     const renderTableBody = (items) => items.map(item => `
         <tr>
             ${config.columns.map(col => `<td>${col.render(item)}</td>`).join('')}
@@ -237,7 +248,6 @@ const renderGenericSection = (configKey, data, sectionId) => {
             </td>
         </tr>
     `).join('');
-
     container.innerHTML = `
         <div class="section-header">
             <h2 class="section-title">Quản lý ${config.name}</h2>
@@ -256,37 +266,12 @@ const renderGenericSection = (configKey, data, sectionId) => {
             </table>
         </div>
     `;
-
     document.getElementById(`${sectionId}-search`).addEventListener('input', (e) => {
         const searchTerm = e.target.value.toLowerCase();
         const filteredData = state[configKey].filter(item => 
             config.columns.some(col => String(col.render(item)).toLowerCase().includes(searchTerm))
         );
         document.getElementById(`${sectionId}-table-body`).innerHTML = renderTableBody(filteredData);
-    });
-};
-
-const renderSettingsSection = () => {
-    const container = document.getElementById('settings-management-section');
-    container.innerHTML = `
-        <div class="section-header"><h2 class="section-title">Thiết lập Định mức Tiền dạy</h2></div>
-        <div class="data-table-container" style="padding: 25px;">
-             <div class="form-group">
-                <label for="pricePerUnit">Định mức tiền cho một tiết dạy (VNĐ)</label>
-                <input type="number" id="pricePerUnit" name="pricePerUnit" value="${state.settings.pricePerUnit || 0}" min="0">
-            </div>
-            <button class="btn btn-success" id="save-settings-btn"><i class="fas fa-save"></i> Lưu thiết lập</button>
-        </div>`;
-    document.getElementById('save-settings-btn').addEventListener('click', async () => {
-        const price = Number(document.getElementById('pricePerUnit').value);
-        try {
-            await setDoc(doc(db, "settings", "main"), { pricePerUnit: price });
-            state.settings.pricePerUnit = price;
-            alert("Đã lưu thiết lập thành công!");
-        } catch (error) {
-            console.error("Error saving settings:", error);
-            alert("Lỗi khi lưu thiết lập.");
-        }
     });
 };
 
@@ -302,7 +287,6 @@ const updateDashboard = () => {
     updateChart('degreeChart', 'degree-chart', 'bar', state.degrees, state.teachers, 'degreeId', 'Giáo viên theo Bằng cấp');
     updateChart('semesterChart', 'semester-chart', 'pie', state.semesters, state.courseSections, 'semesterId', 'Lớp học phần theo Kỳ học');
 };
-
 const updateChart = (chartStateKey, canvasId, type, masterData, countData, countField, label) => {
     const canvas = document.getElementById(canvasId);
     if (!canvas) return;
@@ -327,7 +311,7 @@ const updateChart = (chartStateKey, canvasId, type, masterData, countData, count
 };
 
 // =================================================================================
-// PAYMENT CALCULATION & REPORTS (NHÓM 3 & 4)
+// PAYMENT CALCULATION & REPORTS
 // =================================================================================
 const getClassCoefficient = (studentCount) => {
     if (studentCount < 20) return -0.3;
@@ -336,13 +320,18 @@ const getClassCoefficient = (studentCount) => {
     if (studentCount <= 49) return 0;
     if (studentCount <= 59) return 0.1;
     if (studentCount <= 69) return 0.2;
-    // from 70 to 79 should be 0.3 according to spec
     if (studentCount <= 79) return 0.3; 
-    return 0.3; // Default for > 79
+    return 0.3;
 };
 
 const calculateTeacherPaymentForSemester = (teacherId, semesterId) => {
-    const pricePerUnit = state.settings.pricePerUnit || 0;
+    const paymentRateDoc = state.paymentRates.find(rate => rate.semesterId === semesterId);
+    const pricePerUnit = paymentRateDoc ? paymentRateDoc.pricePerUnit : 0;
+    
+    if (pricePerUnit === 0) {
+        return { details: [], totalPayment: 0, missingRate: true };
+    }
+
     const teacher = findById(state.teachers, teacherId);
     if (!teacher) return { details: [], totalPayment: 0 };
     
@@ -361,10 +350,8 @@ const calculateTeacherPaymentForSemester = (teacherId, semesterId) => {
                 const classCoeff = getClassCoefficient(courseSection.studentCount);
                 const courseCoeff = course.coefficient || 0;
                 const periods = course.periods || 0;
-                
                 const paymentForClass = periods * (classCoeff + courseCoeff) * teacherCoeff * pricePerUnit;
                 totalPayment += paymentForClass;
-
                 paymentDetails.push({
                     sectionCode: courseSection.sectionCode,
                     courseName: course.name,
@@ -390,12 +377,13 @@ const displayPaymentCalculationResult = () => {
         container.innerHTML = `<p style="padding: 20px; text-align: center;">Vui lòng chọn giáo viên và kỳ học.</p>`;
         return;
     }
-    if ((state.settings.pricePerUnit || 0) === 0) {
-        alert("Vui lòng thiết lập định mức tiền/tiết trước khi tính toán!");
-        container.innerHTML = `<p style="padding: 20px; text-align: center;">Chưa có định mức tiền/tiết. Vui lòng vào mục "Tính tiền & Hệ số" > "Định mức tiền/tiết" để thiết lập.</p>`;
+    const paymentRateDoc = state.paymentRates.find(rate => rate.semesterId === semesterId);
+    if (!paymentRateDoc || paymentRateDoc.pricePerUnit === 0) {
+        alert(`Kỳ học này chưa được thiết lập định mức tiền/tiết. Vui lòng thiết lập để tính lương.`);
+        container.innerHTML = `<p style="padding: 20px; text-align: center;">Chưa có định mức cho kỳ học này. Vui lòng vào mục 'Tính tiền & Hệ số' > 'Định mức tiền/tiết' để thiết lập.</p>`;
         return;
     }
-
+    
     const { details, totalPayment } = calculateTeacherPaymentForSemester(teacherId, semesterId);
 
     if (details.length === 0) {
@@ -414,18 +402,12 @@ const displayPaymentCalculationResult = () => {
             <td style="font-weight: bold;">${d.payment.toLocaleString('vi-VN')} VNĐ</td>
         </tr>
     `).join('');
-
     container.innerHTML = `
         <table class="data-table">
             <thead>
                 <tr>
-                    <th>Mã Lớp HP</th>
-                    <th>Tên Học phần</th>
-                    <th>Số tiết</th>
-                    <th>HS Lớp</th>
-                    <th>HS Học phần</th>
-                    <th>HS Bằng cấp (GV)</th>
-                    <th>Tiền lớp</th>
+                    <th>Mã Lớp HP</th><th>Tên Học phần</th><th>Số tiết</th><th>HS Lớp</th>
+                    <th>HS Học phần</th><th>HS Bằng cấp (GV)</th><th>Tiền lớp</th>
                 </tr>
             </thead>
             <tbody>${tableRows}</tbody>
@@ -436,11 +418,58 @@ const displayPaymentCalculationResult = () => {
     `;
 };
 
+const renderReportTable = (data) => {
+    const container = document.getElementById('report-content-container');
+    if (data.length === 0) {
+        container.innerHTML = `<p style="padding: 20px; text-align: center;">Không có dữ liệu thanh toán cho các lựa chọn này.</p>`;
+        return;
+    }
+    const tableRows = data.sort((a,b) => b.totalPayment - a.totalPayment).map(d => `
+        <tr>
+            <td>${d.teacherName}</td>
+            <td>${d.facultyName}</td>
+            <td style="font-weight: bold;">${d.totalPayment.toLocaleString('vi-VN')} VNĐ</td>
+        </tr>
+    `).join('');
+    container.innerHTML = `
+         <table class="data-table">
+            <thead>
+                <tr>
+                    <th>Tên Giáo viên</th>
+                    <th>Khoa</th>
+                    <th>Tổng tiền dạy (ước tính)</th>
+                </tr>
+            </thead>
+            <tbody>${tableRows}</tbody>
+        </table>`;
+};
+
+const displayReportSummary = (data) => {
+    const summaryContainer = document.getElementById('report-summary-container');
+    const totalSalary = data.reduce((sum, item) => sum + item.totalPayment, 0);
+    
+    if (totalSalary > 0) {
+        summaryContainer.innerHTML = `
+            <div class="report-summary">
+                <h3>Tổng lương báo cáo: <span>${totalSalary.toLocaleString('vi-VN')} VNĐ</span></h3>
+            </div>
+        `;
+    } else {
+        summaryContainer.innerHTML = '';
+    }
+};
 
 const generateReport = () => {
     const reportType = document.getElementById('report-type-select').value;
     const schoolYear = document.getElementById('report-year-select').value;
     const container = document.getElementById('report-content-container');
+    const summaryContainer = document.getElementById('report-summary-container');
+    const searchInput = document.getElementById('report-search-input');
+
+    container.innerHTML = '';
+    summaryContainer.innerHTML = '';
+    searchInput.value = '';
+    state.currentReportData = [];
 
     if (!schoolYear) {
         container.innerHTML = `<p style="padding: 20px; text-align: center;">Vui lòng chọn năm học để xem báo cáo.</p>`;
@@ -477,33 +506,11 @@ const generateReport = () => {
             totalPayment: totalYearlyPayment
         };
     }).filter(d => d.totalPayment > 0);
-
-    if (reportData.length === 0) {
-        container.innerHTML = `<p style="padding: 20px; text-align: center;">Không có dữ liệu thanh toán cho các lựa chọn này.</p>`;
-        return;
-    }
     
-    const tableRows = reportData.sort((a,b) => b.totalPayment - a.totalPayment).map(d => `
-        <tr>
-            <td>${d.teacherName}</td>
-            <td>${d.facultyName}</td>
-            <td style="font-weight: bold;">${d.totalPayment.toLocaleString('vi-VN')} VNĐ</td>
-        </tr>
-    `).join('');
-
-    container.innerHTML = `
-         <table class="data-table">
-            <thead>
-                <tr>
-                    <th>Tên Giáo viên</th>
-                    <th>Khoa</th>
-                    <th>Tổng tiền dạy năm học ${schoolYear} (ước tính)</th>
-                </tr>
-            </thead>
-            <tbody>${tableRows}</tbody>
-        </table>`;
+    state.currentReportData = reportData;
+    renderReportTable(state.currentReportData);
+    displayReportSummary(state.currentReportData);
 };
-
 
 const populateReportFilters = () => {
     const teacherSelect = document.getElementById('calc-teacher-select');
@@ -519,7 +526,6 @@ const populateReportFilters = () => {
     yearReportSelect.innerHTML = '<option value="">-- Chọn năm học --</option>' + schoolYears.map(y => `<option value="${y}">${y}</option>`).join('');
 };
 
-
 // =================================================================================
 // MODAL & FORM HANDLING
 // =================================================================================
@@ -527,11 +533,8 @@ window.openFormModal = (configKey, id = null) => {
     state.currentEntity = configKey;
     state.currentId = id;
     const config = GENERIC_CONFIG[configKey];
-    
     let currentData = id ? findById(state[configKey], id) || {} : {};
-    
     document.getElementById('modal-title').textContent = `${id ? 'Chỉnh sửa' : 'Thêm'} ${config.name}`;
-    
     const formContainer = document.getElementById('modal-form');
     formContainer.innerHTML = config.fields.map(field => {
         const value = currentData[field.name] || '';
@@ -541,7 +544,6 @@ window.openFormModal = (configKey, id = null) => {
         const min = field.min !== undefined ? `min="${field.min}"` : '';
         const max = field.max !== undefined ? `max="${field.max}"` : '';
         const step = field.step ? `step="${field.step}"` : '';
-
         if (field.type === 'select') {
             const options = field.options();
             const optionLabelFunc = typeof field.optionLabel === 'function' ? field.optionLabel : (opt) => opt[field.optionLabel || 'name'];
@@ -554,92 +556,76 @@ window.openFormModal = (configKey, id = null) => {
     }).join('');
     document.getElementById('form-modal').style.display = 'flex';
 };
-
 const closeModal = () => {
     document.getElementById('form-modal').style.display = 'none';
-    document.getElementById('modal-form').innerHTML = ''; // Clear form on close
+    document.getElementById('modal-form').innerHTML = '';
 };
-
 const saveForm = async () => {
     const config = GENERIC_CONFIG[state.currentEntity];
     const form = document.getElementById('modal-form');
-    
     if (!form.checkValidity()) {
-        form.reportValidity(); // Show browser's validation tooltips
+        form.reportValidity();
         return;
     }
-    
     const data = {};
     for (const field of config.fields) {
         const input = document.getElementById(field.name);
         data[field.name] = input.type === 'number' ? Number(input.value) : input.value;
     }
-
-    // Custom Validation Logic based on Spec
     try {
-        // Handle auto-generation for teacher ID
         if (config.key === 'teachers' && !data.teacherId) {
             data.teacherId = `GV${Math.floor(1000 + Math.random() * 9000)}`;
         }
-
-        // Handle uniqueness checks
+        if (config.key === 'paymentRates') {
+            data.timestamp = new Date();
+        }
         const uniqueChecks = [
             { key: 'teachers', field: 'teacherId' }, { key: 'courses', field: 'courseCode' },
             { key: 'courseSections', field: 'sectionCode' }, { key: 'teacherCoefficients', field: 'degreeId' },
             { key: 'faculties', field: 'name' }, { key: 'faculties', field: 'shortName' },
             { key: 'degrees', field: 'name' }, { key: 'degrees', field: 'shortName' },
+            { key: 'paymentRates', field: 'semesterId'}
         ];
         for (const check of uniqueChecks) {
             if (config.key === check.key) {
                 if (state[check.key].some(item => item[check.field] === data[check.field] && item.id !== state.currentId)) {
-                    throw new Error(`Giá trị '${data[check.field]}' cho trường '${check.field}' đã tồn tại.`);
+                    throw new Error(`Giá trị '${data[check.field]}' cho trường này đã tồn tại.`);
                 }
             }
         }
-
-        // Handle semester duration check
         if (config.key === 'semesters') {
             const startDate = new Date(data.startDate);
             const endDate = new Date(data.endDate);
-            if (endDate < startDate) {
-                throw new Error("Ngày kết thúc phải lớn hơn hoặc bằng ngày bắt đầu.");
-            }
-            const threeMonthsLater = new Date(startDate.setMonth(startDate.getMonth() + 3));
-            if (endDate > threeMonthsLater) {
-                throw new Error("Kỳ học phải diễn ra trong vòng 3 tháng.");
-            }
+            if (endDate < startDate) throw new Error("Ngày kết thúc phải lớn hơn hoặc bằng ngày bắt đầu.");
+            const threeMonthsLater = new Date(new Date(data.startDate).setMonth(new Date(data.startDate).getMonth() + 3));
+            if (endDate > threeMonthsLater) throw new Error("Kỳ học phải diễn ra trong vòng 3 tháng.");
         }
-        
-        // Handle assignment duplication check
         if (config.key === 'assignments') {
-             if (state.assignments.some(item => item.courseSectionId === data.courseSectionId && item.id !== state.currentId)) {
-                throw new Error('Lớp học phần này đã được phân công cho một giáo viên khác.');
+            const courseSection = findById(state.courseSections, data.courseSectionId);
+            if (!courseSection) throw new Error("Không tìm thấy lớp học phần đã chọn.");
+            const maxSlots = courseSection.classCount || 1;
+            const currentAssignments = state.assignments.filter(a => a.courseSectionId === data.courseSectionId).length;
+            if (currentAssignments >= maxSlots && !state.currentId) {
+                throw new Error(`Lớp học phần này đã được phân công đủ ${maxSlots} giáo viên.`);
             }
         }
-
-        // Save to Firestore
         if (state.currentId) {
             await updateDoc(doc(db, config.collection, state.currentId), data);
         } else {
             await addDoc(collection(db, config.collection), data);
         }
-
         alert(`Đã lưu ${config.name} thành công!`);
         closeModal();
         fetchAllData();
-
     } catch (error) {
         console.error("Error saving data: ", error);
         alert(`Lỗi khi lưu dữ liệu: ${error.message}`);
     }
 };
-
 window.deleteItem = async (configKey, id) => {
     const config = GENERIC_CONFIG[configKey];
     if (!confirm(`Bạn có chắc chắn muốn xóa ${config.name} này không? Thao tác này không thể hoàn tác.`)) return;
-    
     try {
-        // Advanced delete check: prevent deleting if item is referenced elsewhere
         if (config.key === 'faculties' && state.teachers.some(t => t.facultyId === id)) {
             throw new Error("Không thể xóa Khoa vì vẫn còn giáo viên thuộc khoa này.");
         }
@@ -649,8 +635,8 @@ window.deleteItem = async (configKey, id) => {
         if (config.key === 'courses' && state.courseSections.some(cs => cs.courseId === id)) {
             throw new Error("Không thể xóa Học phần vì vẫn còn Lớp học phần thuộc học phần này.");
         }
-        if (config.key === 'semesters' && state.courseSections.some(cs => cs.semesterId === id)) {
-            throw new Error("Không thể xóa Kỳ học vì vẫn còn Lớp học phần thuộc kỳ học này.");
+        if (config.key === 'semesters' && (state.courseSections.some(cs => cs.semesterId === id) || state.paymentRates.some(pr => pr.semesterId === id))) {
+            throw new Error("Không thể xóa Kỳ học vì vẫn còn Lớp học phần hoặc Định mức thuộc kỳ học này.");
         }
         if (config.key === 'teachers' && state.assignments.some(a => a.teacherId === id)) {
             throw new Error("Không thể xóa Giáo viên vì vẫn còn phân công giảng dạy cho giáo viên này.");
@@ -658,7 +644,6 @@ window.deleteItem = async (configKey, id) => {
         if (config.key === 'courseSections' && state.assignments.some(a => a.courseSectionId === id)) {
             throw new Error("Không thể xóa Lớp học phần vì đã có phân công giảng dạy cho lớp này.");
         }
-
         await deleteDoc(doc(db, config.collection, id));
         alert(`${config.name} đã được xóa.`);
         fetchAllData();
@@ -680,34 +665,39 @@ const setupEventListeners = () => {
         document.getElementById('report-faculty-filter-group').style.display = e.target.value === 'faculty' ? 'block' : 'none';
     });
 
+    document.getElementById('report-search-input').addEventListener('input', (e) => {
+        const searchTerm = e.target.value.toLowerCase();
+        if (state.currentReportData.length > 0) {
+            const filteredData = state.currentReportData.filter(item => 
+                item.teacherName.toLowerCase().includes(searchTerm)
+            );
+            renderReportTable(filteredData);
+            displayReportSummary(filteredData);
+        }
+    });
+
     const menuItems = document.querySelectorAll('.menu-item, .submenu-item');
     menuItems.forEach(item => {
         item.addEventListener('click', function(e) {
             e.preventDefault();
             const sectionIdToShow = this.dataset.section;
-
             if (this.classList.contains('has-submenu')) {
                 this.classList.toggle('active');
                 this.nextElementSibling.classList.toggle('open');
                 return;
             }
-            
             menuItems.forEach(i => i.classList.remove('active'));
-            
             this.classList.add('active');
             let parentMenu = this.closest('.submenu')?.previousElementSibling;
             if(parentMenu) {
                 parentMenu.classList.add('active');
             }
-
             if (sectionIdToShow) {
                 document.querySelectorAll('.main-content .section').forEach(s => s.classList.remove('active'));
-                
                 let targetSection = document.getElementById(`${sectionIdToShow}-section`);
                 if (!targetSection) {
                     targetSection = document.getElementById(sectionIdToShow);
                 }
-
                 if (targetSection) {
                     targetSection.classList.add('active');
                     document.getElementById('header-title').textContent = this.textContent.trim();
@@ -721,6 +711,5 @@ const setupEventListeners = () => {
     document.getElementById('modal-save-btn').addEventListener('click', saveForm);
 };
 
-// Expose functions to global scope for inline onclick events
 window.openFormModal = openFormModal;
 window.deleteItem = deleteItem;
