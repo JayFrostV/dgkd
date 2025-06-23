@@ -208,16 +208,19 @@ const GENERIC_CONFIG = {
             }
         ]
     },
+    // ================== CẬP NHẬT TOÀN BỘ CẤU HÌNH HỆ SỐ GV ==================
     teacherCoefficients: {
         key: 'teacherCoefficients', name: "Hệ số theo Bằng cấp", collection: "teacher_coefficients",
         fields: [
+            { name: 'semesterId', label: 'Áp dụng cho Kỳ học', type: 'select', options: () => state.semesters, optionLabel: (s) => `${s.name} (${s.schoolYear})`, required: true },
             { name: 'degreeId', label: 'Bằng cấp', type: 'select', options: () => state.degrees, required: true },
-            // THAY ĐỔI DUY NHẤT NẰM Ở DÒNG NÀY
             { name: 'coefficient', label: 'Hệ số', type: 'number', required: true, min: 1, max: 3, step: 0.1 }
         ],
         columns: [
+            { header: 'Kỳ học áp dụng', render: i => { const s = findById(state.semesters, i.semesterId); return s ? `${s.name} (${s.schoolYear})` : 'N/A'; }},
             { header: 'Bằng cấp', render: i => findById(state.degrees, i.degreeId)?.name || 'N/A' },
-            { header: 'Hệ số', render: i => i.coefficient }
+            { header: 'Hệ số', render: i => i.coefficient },
+            { header: 'Ngày cập nhật', render: i => i.timestamp ? new Date(i.timestamp.seconds * 1000).toLocaleDateString('vi-VN') : 'N/A' }
         ]
     }
 };
@@ -325,6 +328,7 @@ const getClassCoefficient = (studentCount) => {
     return 0.3;
 };
 
+// ================== CẬP NHẬT HÀM TÍNH LƯƠNG ĐỂ LẤY ĐÚNG HỆ SỐ GV THEO KỲ ==================
 const calculateTeacherPaymentForSemester = (teacherId, semesterId) => {
     const paymentRateDoc = state.paymentRates.find(rate => rate.semesterId === semesterId);
     const pricePerUnit = paymentRateDoc ? paymentRateDoc.pricePerUnit : 0;
@@ -336,7 +340,10 @@ const calculateTeacherPaymentForSemester = (teacherId, semesterId) => {
     const teacher = findById(state.teachers, teacherId);
     if (!teacher) return { details: [], totalPayment: 0 };
     
-    const teacherCoeffItem = state.teacherCoefficients.find(tc => tc.degreeId === teacher.degreeId);
+    // Tìm hệ số của giáo viên ứng với kỳ học đang tính
+    const teacherCoeffItem = state.teacherCoefficients.find(tc => 
+        tc.degreeId === teacher.degreeId && tc.semesterId === semesterId
+    );
     const teacherCoeff = teacherCoeffItem ? teacherCoeffItem.coefficient : 0;
 
     const relevantAssignments = state.assignments.filter(a => a.teacherId === teacherId);
@@ -615,23 +622,33 @@ const saveForm = async () => {
         if (config.key === 'teachers' && !data.teacherId) {
             data.teacherId = `GV${Math.floor(1000 + Math.random() * 9000)}`;
         }
-        if (config.key === 'paymentRates') {
+        // Thêm timestamp khi lưu định mức hoặc hệ số
+        if (config.key === 'paymentRates' || config.key === 'teacherCoefficients') {
             data.timestamp = new Date();
         }
+        
         const uniqueChecks = [
             { key: 'teachers', field: 'teacherId' }, { key: 'courses', field: 'courseCode' },
-            { key: 'courseSections', field: 'sectionCode' }, { key: 'teacherCoefficients', field: 'degreeId' },
+            { key: 'courseSections', field: 'sectionCode' }, 
             { key: 'faculties', field: 'name' }, { key: 'faculties', field: 'shortName' },
             { key: 'degrees', field: 'name' }, { key: 'degrees', field: 'shortName' },
             { key: 'paymentRates', field: 'semesterId'}
         ];
+
         for (const check of uniqueChecks) {
             if (config.key === check.key) {
                 if (state[check.key].some(item => item[check.field] === data[check.field] && item.id !== state.currentId)) {
-                    throw new Error(`Giá trị '${data[check.field]}' cho trường này đã tồn tại.`);
+                    throw new Error(`Giá trị cho trường '${check.field}' đã tồn tại.`);
                 }
             }
         }
+        // Kiểm tra duy nhất cho cặp (semesterId, degreeId)
+        if (config.key === 'teacherCoefficients') {
+            if (state.teacherCoefficients.some(item => item.semesterId === data.semesterId && item.degreeId === data.degreeId && item.id !== state.currentId)) {
+                throw new Error(`Đã có hệ số cho bằng cấp này trong kỳ học đã chọn.`);
+            }
+        }
+
         if (config.key === 'semesters') {
             const startDate = new Date(data.startDate);
             const endDate = new Date(data.endDate);
@@ -674,8 +691,8 @@ window.deleteItem = async (configKey, id) => {
         if (config.key === 'courses' && state.courseSections.some(cs => cs.courseId === id)) {
             throw new Error("Không thể xóa Học phần vì vẫn còn Lớp học phần thuộc học phần này.");
         }
-        if (config.key === 'semesters' && (state.courseSections.some(cs => cs.semesterId === id) || state.paymentRates.some(pr => pr.semesterId === id))) {
-            throw new Error("Không thể xóa Kỳ học vì vẫn còn Lớp học phần hoặc Định mức thuộc kỳ học này.");
+        if (config.key === 'semesters' && (state.courseSections.some(cs => cs.semesterId === id) || state.paymentRates.some(pr => pr.semesterId === id) || state.teacherCoefficients.some(tc => tc.semesterId === id))) {
+            throw new Error("Không thể xóa Kỳ học vì vẫn còn Lớp học phần, Định mức hoặc Hệ số GV thuộc kỳ học này.");
         }
         if (config.key === 'teachers' && state.assignments.some(a => a.teacherId === id)) {
             throw new Error("Không thể xóa Giáo viên vì vẫn còn phân công giảng dạy cho giáo viên này.");
